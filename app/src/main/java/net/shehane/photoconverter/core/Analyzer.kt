@@ -1,4 +1,4 @@
-package com.pshehane.heifconverter.core
+package net.shehane.photoconverter.core
 
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder

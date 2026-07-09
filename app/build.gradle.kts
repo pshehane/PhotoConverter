@@ -11,11 +11,11 @@ base {
 }
 
 android {
-    namespace = "com.pshehane.heifconverter"
+    namespace = "net.shehane.photoconverter"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.pshehane.heifconverter"
+        applicationId = "net.shehane.photoconverter"
         minSdk = 34
         targetSdk = 35
         versionCode = 1

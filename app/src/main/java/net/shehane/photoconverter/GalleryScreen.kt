@@ -1,4 +1,4 @@
-package com.pshehane.heifconverter
+package net.shehane.photoconverter
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -41,8 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.pshehane.heifconverter.core.ConversionOutput
-import com.pshehane.heifconverter.core.ConversionResult
+import net.shehane.photoconverter.core.ConversionOutput
+import net.shehane.photoconverter.core.ConversionResult
 import java.io.File
 import java.io.FileInputStream
 import kotlinx.coroutines.Dispatchers

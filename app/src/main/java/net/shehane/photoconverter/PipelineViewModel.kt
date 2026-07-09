@@ -1,12 +1,12 @@
-package com.pshehane.heifconverter
+package net.shehane.photoconverter
 
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.pshehane.heifconverter.core.AnalysisResult
-import com.pshehane.heifconverter.core.ConversionResult
-import com.pshehane.heifconverter.core.Pipeline
+import net.shehane.photoconverter.core.AnalysisResult
+import net.shehane.photoconverter.core.ConversionResult
+import net.shehane.photoconverter.core.Pipeline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

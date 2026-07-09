@@ -1,4 +1,4 @@
-package com.pshehane.heifconverter.cli
+package net.shehane.photoconverter.cli
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -9,7 +9,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import com.pshehane.heifconverter.core.Pipeline
+import net.shehane.photoconverter.core.Pipeline
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,10 +18,10 @@ import kotlinx.coroutines.launch
 
 /**
  * adb-driven CLI:
- *   adb shell pm grant com.pshehane.heifconverter android.permission.READ_MEDIA_IMAGES
- *   adb shell pm grant com.pshehane.heifconverter android.permission.ACCESS_MEDIA_LOCATION
- *   adb shell am start-foreground-service -n com.pshehane.heifconverter/.cli.CliService -e cmd run --ei count 12
- *   adb shell am start-foreground-service -n com.pshehane.heifconverter/.cli.CliService -e cmd cleanup
+ *   adb shell pm grant net.shehane.photoconverter android.permission.READ_MEDIA_IMAGES
+ *   adb shell pm grant net.shehane.photoconverter android.permission.ACCESS_MEDIA_LOCATION
+ *   adb shell am start-foreground-service -n net.shehane.photoconverter/.cli.CliService -e cmd run --ei count 12
+ *   adb shell am start-foreground-service -n net.shehane.photoconverter/.cli.CliService -e cmd cleanup
  *   adb logcat -s HEIFConv
  */
 class CliService : Service() {

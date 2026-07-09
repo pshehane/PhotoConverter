@@ -1,4 +1,4 @@
-package com.pshehane.heifconverter
+package net.shehane.photoconverter
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -39,9 +39,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.pshehane.heifconverter.core.AnalysisResult
-import com.pshehane.heifconverter.core.ConversionResult
-import com.pshehane.heifconverter.core.FileIssue
+import net.shehane.photoconverter.core.AnalysisResult
+import net.shehane.photoconverter.core.ConversionResult
+import net.shehane.photoconverter.core.FileIssue
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

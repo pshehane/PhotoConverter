@@ -23,28 +23,28 @@ GPS), and Ultra HDR gainmaps are preserved where platform APIs allow.
    loop — on both sides independently.
 7. **Clean up temp files** removes all outputs.
 
-Outputs land in `/storage/emulated/0/Android/data/com.pshehane.heifconverter/files/converted/`
+Outputs land in `/storage/emulated/0/Android/data/net.shehane.photoconverter/files/converted/`
 (`toJpeg/`, `toHeif/`), report in `.../files/report.json`.
 
 ## CLI (adb)
 
 ```sh
 # one-time grants (CLI enumerates MediaStore; picker path doesn't need them)
-adb shell pm grant com.pshehane.heifconverter android.permission.READ_MEDIA_IMAGES
-adb shell pm grant com.pshehane.heifconverter android.permission.ACCESS_MEDIA_LOCATION
+adb shell pm grant net.shehane.photoconverter android.permission.READ_MEDIA_IMAGES
+adb shell pm grant net.shehane.photoconverter android.permission.ACCESS_MEDIA_LOCATION
 
 # run the full pipeline over the 12 most recent gallery images
-adb shell am start-foreground-service -n com.pshehane.heifconverter/.cli.CliService -e cmd run --ei count 12
+adb shell am start-foreground-service -n net.shehane.photoconverter/.cli.CliService -e cmd run --ei count 12
 
 # watch progress / results
 adb logcat -s HEIFConv
 
 # fetch outputs + report
-adb pull /sdcard/Android/data/com.pshehane.heifconverter/files/converted .
-adb pull /sdcard/Android/data/com.pshehane.heifconverter/files/report.json .
+adb pull /sdcard/Android/data/net.shehane.photoconverter/files/converted .
+adb pull /sdcard/Android/data/net.shehane.photoconverter/files/report.json .
 
 # remove temp files
-adb shell am start-foreground-service -n com.pshehane.heifconverter/.cli.CliService -e cmd cleanup
+adb shell am start-foreground-service -n net.shehane.photoconverter/.cli.CliService -e cmd cleanup
 ```
 
 ## Validation
@@ -83,5 +83,5 @@ Gradle 8.9 wrapper, AGP 8.7.3, Kotlin 2.2.0, compose-bom 2024.12.01.
 
 ```sh
 ./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/PhotoConverter-debug.apk
 ```
