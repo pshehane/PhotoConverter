@@ -247,6 +247,183 @@ object Isobmff {
         return w.toByteArray()
     }
 
+    // ---------- AVIF container construction ----------
+
+    private fun fullBox(type: String, version: Int, flags: Int, payload: ByteArray): ByteArray {
+        val w = Writer()
+        w.u8(version)
+        w.u8((flags shr 16) and 0xFF); w.u8((flags shr 8) and 0xFF); w.u8(flags and 0xFF)
+        w.bytes(payload)
+        return box(type, w.toByteArray())
+    }
+
+    /**
+     * Builds a minimal single-item AVIF: ftyp + meta(hdlr/pitm/iloc/iinf/iprp) + mdat.
+     * The result has a normal meta box, so [injectMetadata] can add Exif/XMP afterwards.
+     */
+    fun buildAvif(width: Int, height: Int, av1c: ByteArray, itemData: ByteArray): ByteArray {
+        val ftyp = box("ftyp", Writer().apply {
+            fourcc("avif"); u32(0); fourcc("avif"); fourcc("mif1"); fourcc("miaf")
+        }.toByteArray())
+
+        val hdlr = fullBox("hdlr", 0, 0, Writer().apply {
+            u32(0); fourcc("pict"); u32(0); u32(0); u32(0); u8(0)
+        }.toByteArray())
+
+        val pitm = fullBox("pitm", 0, 0, Writer().apply { u16(1) }.toByteArray())
+
+        val iinf = fullBox("iinf", 0, 0, Writer().apply {
+            u16(1)
+            bytes(buildInfe(1, "av01", null))
+        }.toByteArray())
+
+        val ispe = fullBox("ispe", 0, 0, Writer().apply {
+            u32(width.toLong()); u32(height.toLong())
+        }.toByteArray())
+        val pixi = fullBox("pixi", 0, 0, Writer().apply { u8(3); u8(8); u8(8); u8(8) }.toByteArray())
+        val av1C = box("av1C", av1c)
+        val ipco = box("ipco", ispe + pixi + av1C)
+        val ipma = fullBox("ipma", 0, 0, Writer().apply {
+            u32(1)      // entry_count
+            u16(1)      // item_ID
+            u8(3)       // association_count
+            u8(0x01)    // ispe
+            u8(0x02)    // pixi
+            u8(0x80 or 0x03) // av1C, essential
+        }.toByteArray())
+        val iprp = box("iprp", ipco + ipma)
+
+        fun buildIlocBox(offset: Long) = fullBox("iloc", 0, 0, Writer().apply {
+            u16(0x4400) // offset_size=4, length_size=4, base_offset_size=0
+            u16(1)      // item_count
+            u16(1)      // item_ID
+            u16(0)      // data_reference_index
+            u16(1)      // extent_count
+            u32(offset)
+            u32(itemData.size.toLong())
+        }.toByteArray())
+
+        fun buildMeta(offset: Long) =
+            fullBox("meta", 0, 0, hdlr + pitm + buildIlocBox(offset) + iinf + iprp)
+
+        val metaSize = buildMeta(0).size
+        val itemOffset = (ftyp.size + metaSize + 8).toLong() // + mdat header
+        val meta = buildMeta(itemOffset)
+        require(meta.size == metaSize) { "meta size instability" }
+
+        val out = java.io.ByteArrayOutputStream(ftyp.size + meta.size + itemData.size + 8)
+        out.write(ftyp)
+        out.write(meta)
+        out.write(box("mdat", itemData))
+        return out.toByteArray()
+    }
+
+    /**
+     * Builds a grid AVIF: N av01 tile items + a 'grid' derived item as the primary,
+     * for images larger than the encoder's frame capability. Tiles are raster order,
+     * all [tileW]x[tileH]; the grid crops to [width]x[height].
+     */
+    fun buildAvifGrid(
+        width: Int,
+        height: Int,
+        tileW: Int,
+        tileH: Int,
+        rows: Int,
+        cols: Int,
+        av1c: ByteArray,
+        tiles: List<ByteArray>,
+    ): ByteArray {
+        val n = tiles.size
+        require(n == rows * cols) { "tile count mismatch" }
+        val gridId = (n + 1).toLong()
+
+        val ftyp = box("ftyp", Writer().apply {
+            fourcc("avif"); u32(0); fourcc("avif"); fourcc("mif1"); fourcc("miaf")
+        }.toByteArray())
+
+        val hdlr = fullBox("hdlr", 0, 0, Writer().apply {
+            u32(0); fourcc("pict"); u32(0); u32(0); u32(0); u8(0)
+        }.toByteArray())
+
+        val pitm = fullBox("pitm", 0, 0, Writer().apply { u16(gridId.toInt()) }.toByteArray())
+
+        val iinf = fullBox("iinf", 0, 0, Writer().apply {
+            u16(n + 1)
+            for (i in 1..n) bytes(buildInfe(i.toLong(), "av01", null))
+            bytes(buildInfe(gridId, "grid", null))
+        }.toByteArray())
+
+        val iref = fullBox("iref", 0, 0, Writer().apply {
+            bytes(box("dimg", Writer().apply {
+                u16(gridId.toInt())
+                u16(n)
+                for (i in 1..n) u16(i)
+            }.toByteArray()))
+        }.toByteArray())
+
+        val ispeTile = fullBox("ispe", 0, 0, Writer().apply {
+            u32(tileW.toLong()); u32(tileH.toLong())
+        }.toByteArray())
+        val pixi = fullBox("pixi", 0, 0, Writer().apply { u8(3); u8(8); u8(8); u8(8) }.toByteArray())
+        val av1C = box("av1C", av1c)
+        val ispeFull = fullBox("ispe", 0, 0, Writer().apply {
+            u32(width.toLong()); u32(height.toLong())
+        }.toByteArray())
+        val ipco = box("ipco", ispeTile + pixi + av1C + ispeFull)
+        val ipma = fullBox("ipma", 0, 0, Writer().apply {
+            u32((n + 1).toLong())
+            for (i in 1..n) {
+                u16(i)
+                u8(3)
+                u8(0x01)          // ispe (tile)
+                u8(0x02)          // pixi
+                u8(0x80 or 0x03)  // av1C, essential
+            }
+            u16(gridId.toInt())
+            u8(2)
+            u8(0x04)              // ispe (full)
+            u8(0x02)              // pixi
+        }.toByteArray())
+        val iprp = box("iprp", ipco + ipma)
+
+        // ImageGrid payload (16-bit output dimensions)
+        val gridPayload = Writer().apply {
+            u8(0); u8(0)
+            u8(rows - 1); u8(cols - 1)
+            u16(width); u16(height)
+        }.toByteArray()
+
+        fun buildIlocBox(base: Long) = fullBox("iloc", 0, 0, Writer().apply {
+            u16(0x4400) // offset_size=4, length_size=4, base_offset_size=0
+            u16(n + 1)
+            var off = base
+            u16(gridId.toInt()); u16(0); u16(1); u32(off); u32(gridPayload.size.toLong())
+            off += gridPayload.size
+            for (i in 1..n) {
+                u16(i); u16(0); u16(1); u32(off); u32(tiles[i - 1].size.toLong())
+                off += tiles[i - 1].size
+            }
+        }.toByteArray())
+
+        fun buildMeta(base: Long) =
+            fullBox("meta", 0, 0, hdlr + pitm + buildIlocBox(base) + iinf + iref + iprp)
+
+        val metaSize = buildMeta(0).size
+        val base = (ftyp.size + metaSize + 8).toLong() // + mdat header
+        val meta = buildMeta(base)
+        require(meta.size == metaSize) { "meta size instability" }
+
+        val mdatContent = java.io.ByteArrayOutputStream(gridPayload.size + tiles.sumOf { it.size })
+        mdatContent.write(gridPayload)
+        for (t in tiles) mdatContent.write(t)
+
+        val out = java.io.ByteArrayOutputStream(ftyp.size + meta.size + mdatContent.size() + 8)
+        out.write(ftyp)
+        out.write(meta)
+        out.write(box("mdat", mdatContent.toByteArray()))
+        return out.toByteArray()
+    }
+
     // ---------- Exif extraction ----------
 
     private fun isTiffHeader(b: ByteArray, o: Int): Boolean {

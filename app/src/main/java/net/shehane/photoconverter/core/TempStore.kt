@@ -9,11 +9,15 @@ class TempStore(context: Context) {
     val root = File(base, "converted")
     val toJpegDir = File(root, "toJpeg")
     val toHeifDir = File(root, "toHeif")
+    val heifToAvifDir = File(root, "heifToAvif")
+    val jpegToAvifDir = File(root, "jpegToAvif")
     val reportFile = File(base, "report.json")
 
     fun prepare() {
         toJpegDir.mkdirs()
         toHeifDir.mkdirs()
+        heifToAvifDir.mkdirs()
+        jpegToAvifDir.mkdirs()
     }
 
     /** Deletes all converted temp files and the report. Returns (files, bytes) removed. */

@@ -21,6 +21,8 @@ data class UiState(
     val analysis: AnalysisResult? = null,
     val heifToJpeg: ConversionResult? = null,
     val jpegToHeif: ConversionResult? = null,
+    val heifToAvif: ConversionResult? = null,
+    val jpegToAvif: ConversionResult? = null,
     val statusMessage: String? = null,
 )
 
@@ -51,7 +53,13 @@ class PipelineViewModel(app: Application) : AndroidViewModel(app) {
                 val j2h = pipeline.convertJpegToHeif(analysis.jpegs)
                 _state.update { it.copy(jpegToHeif = j2h) }
 
-                pipeline.writeReport(analysis, h2j, j2h)
+                val h2a = pipeline.convertHeifToAvif(analysis.heifs)
+                _state.update { it.copy(heifToAvif = h2a) }
+
+                val j2a = pipeline.convertJpegToAvif(analysis.jpegs)
+                _state.update { it.copy(jpegToAvif = j2a) }
+
+                pipeline.writeReport(analysis, h2j, j2h, h2a, j2a)
                 _state.update {
                     it.copy(
                         running = false, phaseLabel = null,

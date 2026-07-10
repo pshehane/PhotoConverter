@@ -11,6 +11,12 @@ import java.nio.ByteBuffer
 
 data class ConvertOutcome(val warnings: List<FileIssue>, val outputVideoLength: Long)
 
+/** ISOBMFF encode targets. */
+enum class IsobmffTarget(val mime: String, val codecName: String) {
+    HEIC("image/heic", "HEVC"),
+    AVIF("image/avif", "AV1"),
+}
+
 /** HEIF→JPEG and JPEG→HEIF conversion with metadata preservation. */
 class Converters(private val context: Context) {
 
@@ -103,11 +109,19 @@ class Converters(private val context: Context) {
         return ConvertOutcome(warnings, outputVideoLength)
     }
 
+    /** JPEG/HEIF → HEIC via HeifWriter (HEVC). */
+    fun toHeif(bytes: ByteArray, info: ImageInfo, out: File): ConvertOutcome =
+        toIsobmff(bytes, info, out, IsobmffTarget.HEIC)
+
+    /** JPEG/HEIF → AVIF via AvifWriter (AV1). */
+    fun toAvif(bytes: ByteArray, info: ImageInfo, out: File): ConvertOutcome =
+        toIsobmff(bytes, info, out, IsobmffTarget.AVIF)
+
     /**
-     * JPEG → HEIF via HeifWriter (HEVC), then EXIF/XMP injected directly into the
-     * ISOBMFF meta box, and any motion video re-appended.
+     * Encode into an ISOBMFF still (HEIC or AVIF), then inject EXIF/XMP directly
+     * into the meta box and re-append any motion video in an mpvd box.
      */
-    fun jpegToHeif(bytes: ByteArray, info: ImageInfo, out: File): ConvertOutcome {
+    private fun toIsobmff(bytes: ByteArray, info: ImageInfo, out: File, target: IsobmffTarget): ConvertOutcome {
         val warnings = ArrayList<FileIssue>()
         var outputVideoLength = 0L
         // hold the full-resolution bitmap only for the encode, then release it
@@ -118,26 +132,51 @@ class Converters(private val context: Context) {
             if (bmp.hasGainmap()) {
                 warnings += FileIssue(
                     info.displayName,
-                    "Ultra HDR gainmap cannot be encoded into HEIF with public Android APIs; output is SDR base image",
+                    "Ultra HDR gainmap cannot be encoded into ${target.name} with public Android APIs; output is SDR base image",
                 )
             }
-            val writer = HeifWriter.Builder(out.absolutePath, width, height, HeifWriter.INPUT_MODE_BITMAP)
-                .setQuality(90)
-                .setMaxImages(1)
-                .build()
-            try {
-                writer.start()
-                writer.addBitmap(bmp)
-                writer.stop(0)
-            } finally {
-                writer.close()
+            when (target) {
+                IsobmffTarget.HEIC -> {
+                    val writer = HeifWriter.Builder(out.absolutePath, width, height, HeifWriter.INPUT_MODE_BITMAP)
+                        .setQuality(90)
+                        .setMaxImages(1)
+                        .build()
+                    try {
+                        writer.start()
+                        writer.addBitmap(bmp)
+                        writer.stop(0)
+                    } finally {
+                        writer.close()
+                    }
+                }
+                IsobmffTarget.AVIF -> {
+                    // MediaMuxer can't write AV1 image items on production devices,
+                    // so encode via MediaCodec and build the container ourselves
+                    if (bmp.colorSpace?.isSrgb == false) {
+                        warnings += FileIssue(
+                            info.displayName,
+                            "wide-gamut source (${bmp.colorSpace?.name}) may be clamped to sRGB by the AV1 encoder surface",
+                        )
+                    }
+                    val enc = AvifCodec.encode(bmp, 90)
+                    val avif = if (enc.isSingle(width, height)) {
+                        Isobmff.buildAvif(width, height, enc.av1c, enc.tiles[0])
+                    } else {
+                        Isobmff.buildAvifGrid(
+                            width, height,
+                            enc.tileWidth, enc.tileHeight, enc.rows, enc.cols,
+                            enc.av1c, enc.tiles,
+                        )
+                    }
+                    out.writeBytes(avif)
+                }
             }
         } finally {
             bmp.recycle()
         }
 
         var heif = out.readBytes()
-        if (heif.isEmpty()) throw IOException("HeifWriter produced empty file")
+        if (heif.isEmpty()) throw IOException("${target.name} writer produced empty file")
 
         val exifPayload = Exif.buildTiff(context, bytes, width, height)?.let { Exif.heifExifPayload(it) }
         if (exifPayload == null) warnings += FileIssue(info.displayName, "no EXIF found in source")
@@ -146,7 +185,7 @@ class Converters(private val context: Context) {
         val motion = info.isMotionPhoto && info.videoOffset > 0
         val xmpPacket: String? = when {
             motion -> Xmp.motionPhoto(
-                "image/heic",
+                target.mime,
                 (bytes.size - info.videoOffset),
                 Xmp.presentationTimestampUs(srcXmp),
             )

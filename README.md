@@ -15,6 +15,10 @@ GPS), and Ultra HDR gainmaps are preserved where platform APIs allow.
 4. HEIF→JPEG conversion with progress, then stats; error/warning counts are tappable
    and open the issue list.
 5. JPEG→HEIF conversion, same reporting.
+5b. HEIF→AVIF and JPEG→AVIF conversions follow, same reporting. AVIF is encoded
+   with MediaCodec AV1 and the container is built in-app (`Isobmff.buildAvif` /
+   `buildAvifGrid`) because the platform MediaMuxer cannot mux AV1 image items;
+   images beyond the encoder's frame cap are tiled into a `grid` derived item.
 6. Tapping a conversion card opens a scrollable two-column comparison gallery
    (original left, converted right). The window runs in `COLOR_MODE_HDR` and images
    are decoded to hardware bitmaps, so Ultra HDR gainmaps get the real HDR boost and
@@ -24,7 +28,7 @@ GPS), and Ultra HDR gainmaps are preserved where platform APIs allow.
 7. **Clean up temp files** removes all outputs.
 
 Outputs land in `/storage/emulated/0/Android/data/net.shehane.photoconverter/files/converted/`
-(`toJpeg/`, `toHeif/`), report in `.../files/report.json`.
+(`toJpeg/`, `toHeif/`, `heifToAvif/`, `jpegToAvif/`), report in `.../files/report.json`.
 
 ## CLI (adb)
 

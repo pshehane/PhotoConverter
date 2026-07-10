@@ -110,6 +110,8 @@ fun PipelineScreen(
         state.analysis?.let { AnalysisCard(it) }
         state.heifToJpeg?.let { ConversionCard(it, onOpenGallery) }
         state.jpegToHeif?.let { ConversionCard(it, onOpenGallery) }
+        state.heifToAvif?.let { ConversionCard(it, onOpenGallery) }
+        state.jpegToAvif?.let { ConversionCard(it, onOpenGallery) }
     }
 }
 

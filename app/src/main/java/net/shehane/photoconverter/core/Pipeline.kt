@@ -84,7 +84,17 @@ class Pipeline(
 
     fun convertJpegToHeif(images: List<ImageInfo>): ConversionResult =
         convert("JPEG to HEIF", images, store.toHeifDir, "heic") { bytes, info, out ->
-            converters.jpegToHeif(bytes, info, out)
+            converters.toHeif(bytes, info, out)
+        }
+
+    fun convertHeifToAvif(images: List<ImageInfo>): ConversionResult =
+        convert("HEIF to AVIF", images, store.heifToAvifDir, "avif") { bytes, info, out ->
+            converters.toAvif(bytes, info, out)
+        }
+
+    fun convertJpegToAvif(images: List<ImageInfo>): ConversionResult =
+        convert("JPEG to AVIF", images, store.jpegToAvifDir, "avif") { bytes, info, out ->
+            converters.toAvif(bytes, info, out)
         }
 
     private fun convert(
@@ -136,12 +146,20 @@ class Pipeline(
 
     // ---------- report ----------
 
-    fun writeReport(analysis: AnalysisResult?, h2j: ConversionResult?, j2h: ConversionResult?) {
+    fun writeReport(
+        analysis: AnalysisResult?,
+        h2j: ConversionResult?,
+        j2h: ConversionResult?,
+        h2a: ConversionResult? = null,
+        j2a: ConversionResult? = null,
+    ) {
         val json = JSONObject()
             .put("generatedAt", System.currentTimeMillis())
             .put("analysis", analysis?.toJson() ?: JSONObject.NULL)
             .put("heifToJpeg", h2j?.toJson() ?: JSONObject.NULL)
             .put("jpegToHeif", j2h?.toJson() ?: JSONObject.NULL)
+            .put("heifToAvif", h2a?.toJson() ?: JSONObject.NULL)
+            .put("jpegToAvif", j2a?.toJson() ?: JSONObject.NULL)
             .put("outputRoot", store.root.absolutePath)
         store.reportFile.writeText(json.toString(2))
         onLog("report written: ${store.reportFile.absolutePath}")

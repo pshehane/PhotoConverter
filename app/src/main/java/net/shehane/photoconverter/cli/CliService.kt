@@ -86,7 +86,19 @@ class CliService : Service() {
         j2h.errors.forEach { Log.w(TAG, "  J2H error: ${it.name}: ${it.message}") }
         j2h.warnings.forEach { Log.w(TAG, "  J2H warning: ${it.name}: ${it.message}") }
 
-        pipeline.writeReport(analysis, h2j, j2h)
+        val h2a = pipeline.convertHeifToAvif(analysis.heifs)
+        Log.i(TAG, "HEIF->AVIF: ${h2a.succeeded}/${h2a.stats.count} ok, ${h2a.errors.size} errors, " +
+            "${h2a.warnings.size} warnings, ${h2a.stats.totalMs}ms total, avg ${h2a.stats.avgMs}ms")
+        h2a.errors.forEach { Log.w(TAG, "  H2A error: ${it.name}: ${it.message}") }
+        h2a.warnings.forEach { Log.w(TAG, "  H2A warning: ${it.name}: ${it.message}") }
+
+        val j2a = pipeline.convertJpegToAvif(analysis.jpegs)
+        Log.i(TAG, "JPEG->AVIF: ${j2a.succeeded}/${j2a.stats.count} ok, ${j2a.errors.size} errors, " +
+            "${j2a.warnings.size} warnings, ${j2a.stats.totalMs}ms total, avg ${j2a.stats.avgMs}ms")
+        j2a.errors.forEach { Log.w(TAG, "  J2A error: ${it.name}: ${it.message}") }
+        j2a.warnings.forEach { Log.w(TAG, "  J2A warning: ${it.name}: ${it.message}") }
+
+        pipeline.writeReport(analysis, h2j, j2h, h2a, j2a)
         Log.i(TAG, "outputs in: ${pipeline.store.root.absolutePath}")
     }
 
