@@ -239,6 +239,14 @@ object Isobmff {
      */
     fun mpvdBox(video: ByteArray): ByteArray = box("mpvd", video)
 
+    /** Just the 8-byte mpvd box header, so the video body can be streamed after it. */
+    fun mpvdHeader(videoLength: Long): ByteArray {
+        val w = Writer()
+        w.u32(videoLength + 8)
+        w.fourcc("mpvd")
+        return w.toByteArray()
+    }
+
     // ---------- Exif extraction ----------
 
     private fun isTiffHeader(b: ByteArray, o: Int): Boolean {

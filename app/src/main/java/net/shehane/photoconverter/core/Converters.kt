@@ -19,6 +19,19 @@ class Converters(private val context: Context) {
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
 
+    /** Heavily sampled decode: enough to check gainmap presence, tiny footprint. */
+    private fun sampledGainmapCheck(bytes: ByteArray): Boolean = try {
+        val b = ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, _, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setTargetSampleSize(8)
+        }
+        val has = b.hasGainmap()
+        b.recycle()
+        has
+    } catch (e: Exception) {
+        false
+    }
+
     /**
      * HEIF → JPEG. Gainmaps ride along automatically: Bitmap.compress writes an
      * Ultra HDR (JPEG_R) file when the bitmap carries a gainmap. EXIF is spliced in
@@ -27,59 +40,67 @@ class Converters(private val context: Context) {
     fun heifToJpeg(bytes: ByteArray, info: ImageInfo, out: File): ConvertOutcome {
         val warnings = ArrayList<FileIssue>()
         var outputVideoLength = 0L
+        // The full-resolution bitmap can be enormous (a 200 MP HEIF is ~800 MB);
+        // hold it only for the compress call and recycle before any further work.
         val bmp = decodeSoftware(bytes)
+        val width = bmp.width
+        val height = bmp.height
+        val hadGainmap: Boolean
+        var jpeg: ByteArray
         try {
-            if (info.hasGainmap && !bmp.hasGainmap()) {
+            hadGainmap = bmp.hasGainmap()
+            if (info.hasGainmap && !hadGainmap) {
                 warnings += FileIssue(info.displayName, "gainmap present in source but lost during decode")
             }
             val baos = ByteArrayOutputStream(bytes.size)
             if (!bmp.compress(Bitmap.CompressFormat.JPEG, 95, baos)) {
                 throw IOException("JPEG encode failed")
             }
-            var jpeg = baos.toByteArray()
-
-            if (info.hasGainmap && bmp.hasGainmap()) {
-                // sanity: did the encoder actually write UltraHDR?
-                val checkGm = try {
-                    val b2 = decodeSoftware(jpeg)
-                    val has = b2.hasGainmap()
-                    b2.recycle()
-                    has
-                } catch (e: Exception) { false }
-                if (!checkGm) warnings += FileIssue(info.displayName, "encoder did not write Ultra HDR gainmap")
-            }
-
-            Exif.buildTiff(context, bytes, bmp.width, bmp.height)?.let { tiff ->
-                try {
-                    jpeg = Jpeg.insertSegment(jpeg, Jpeg.exifApp1(tiff), isExif = true)
-                } catch (e: Exception) {
-                    warnings += FileIssue(info.displayName, "EXIF not copied: ${e.message}")
-                }
-            } ?: run {
-                warnings += FileIssue(info.displayName, "no EXIF found in source")
-            }
-
-            if (info.isMotionPhoto && info.videoOffset > 0) {
-                val video = bytes.copyOfRange(info.videoOffset.toInt(), bytes.size)
-                val ts = Xmp.presentationTimestampUs(Xmp.extract(bytes))
-                jpeg = Jpeg.removeXmp(jpeg)
-                jpeg = Jpeg.insertSegment(
-                    jpeg,
-                    Jpeg.xmpApp1(Xmp.motionPhoto("image/jpeg", video.size.toLong(), ts)),
-                    isExif = false,
-                )
-                out.writeBytes(jpeg + video)
-                outputVideoLength = video.size.toLong()
-            } else {
-                if (info.isMotionPhoto) {
-                    warnings += FileIssue(info.displayName, "motion photo flagged but video not located; video dropped")
-                }
-                out.writeBytes(jpeg)
-            }
-            return ConvertOutcome(warnings, outputVideoLength)
+            jpeg = baos.toByteArray()
         } finally {
             bmp.recycle()
         }
+
+        if (info.hasGainmap && hadGainmap) {
+            // sanity: did the encoder actually write UltraHDR? (sampled decode —
+            // gainmap presence survives sampling, footprint stays small)
+            if (!sampledGainmapCheck(jpeg)) {
+                warnings += FileIssue(info.displayName, "encoder did not write Ultra HDR gainmap")
+            }
+        }
+
+        Exif.buildTiff(context, bytes, width, height)?.let { tiff ->
+            try {
+                jpeg = Jpeg.insertSegment(jpeg, Jpeg.exifApp1(tiff), isExif = true)
+            } catch (e: Exception) {
+                warnings += FileIssue(info.displayName, "EXIF not copied: ${e.message}")
+            }
+        } ?: run {
+            warnings += FileIssue(info.displayName, "no EXIF found in source")
+        }
+
+        if (info.isMotionPhoto && info.videoOffset > 0) {
+            val ts = Xmp.presentationTimestampUs(Xmp.extract(bytes))
+            val videoLength = bytes.size - info.videoOffset
+            jpeg = Jpeg.removeXmp(jpeg)
+            jpeg = Jpeg.insertSegment(
+                jpeg,
+                Jpeg.xmpApp1(Xmp.motionPhoto("image/jpeg", videoLength, ts)),
+                isExif = false,
+            )
+            // stream: avoids concatenating jpeg+video into yet another array
+            out.outputStream().use { os ->
+                os.write(jpeg)
+                os.write(bytes, info.videoOffset.toInt(), videoLength.toInt())
+            }
+            outputVideoLength = videoLength
+        } else {
+            if (info.isMotionPhoto) {
+                warnings += FileIssue(info.displayName, "motion photo flagged but video not located; video dropped")
+            }
+            out.writeBytes(jpeg)
+        }
+        return ConvertOutcome(warnings, outputVideoLength)
     }
 
     /**
@@ -89,7 +110,10 @@ class Converters(private val context: Context) {
     fun jpegToHeif(bytes: ByteArray, info: ImageInfo, out: File): ConvertOutcome {
         val warnings = ArrayList<FileIssue>()
         var outputVideoLength = 0L
+        // hold the full-resolution bitmap only for the encode, then release it
         val bmp = decodeSoftware(bytes)
+        val width = bmp.width
+        val height = bmp.height
         try {
             if (bmp.hasGainmap()) {
                 warnings += FileIssue(
@@ -97,7 +121,7 @@ class Converters(private val context: Context) {
                     "Ultra HDR gainmap cannot be encoded into HEIF with public Android APIs; output is SDR base image",
                 )
             }
-            val writer = HeifWriter.Builder(out.absolutePath, bmp.width, bmp.height, HeifWriter.INPUT_MODE_BITMAP)
+            val writer = HeifWriter.Builder(out.absolutePath, width, height, HeifWriter.INPUT_MODE_BITMAP)
                 .setQuality(90)
                 .setMaxImages(1)
                 .build()
@@ -108,50 +132,55 @@ class Converters(private val context: Context) {
             } finally {
                 writer.close()
             }
-
-            var heif = out.readBytes()
-            if (heif.isEmpty()) throw IOException("HeifWriter produced empty file")
-
-            val exifPayload = Exif.buildTiff(context, bytes, bmp.width, bmp.height)?.let { Exif.heifExifPayload(it) }
-            if (exifPayload == null) warnings += FileIssue(info.displayName, "no EXIF found in source")
-
-            val srcXmp = Xmp.extract(bytes)
-            val motion = info.isMotionPhoto && info.videoOffset > 0
-            val xmpPacket: String? = when {
-                motion -> Xmp.motionPhoto(
-                    "image/heic",
-                    (bytes.size - info.videoOffset),
-                    Xmp.presentationTimestampUs(srcXmp),
-                )
-                srcXmp != null && !srcXmp.contains("Container:Directory") -> srcXmp
-                srcXmp != null -> {
-                    warnings += FileIssue(info.displayName, "source XMP contained a container directory; not copied verbatim")
-                    null
-                }
-                else -> null
-            }
-
-            if (exifPayload != null || xmpPacket != null) {
-                try {
-                    heif = Isobmff.injectMetadata(heif, exifPayload, xmpPacket?.toByteArray(Charsets.UTF_8))
-                } catch (e: Exception) {
-                    warnings += FileIssue(info.displayName, "metadata injection failed: ${e.message}")
-                }
-            }
-
-            if (motion) {
-                val video = bytes.copyOfRange(info.videoOffset.toInt(), bytes.size)
-                out.writeBytes(heif + Isobmff.mpvdBox(video))
-                outputVideoLength = video.size.toLong()
-            } else {
-                if (info.isMotionPhoto) {
-                    warnings += FileIssue(info.displayName, "motion photo flagged but video not located; video dropped")
-                }
-                out.writeBytes(heif)
-            }
-            return ConvertOutcome(warnings, outputVideoLength)
         } finally {
             bmp.recycle()
         }
+
+        var heif = out.readBytes()
+        if (heif.isEmpty()) throw IOException("HeifWriter produced empty file")
+
+        val exifPayload = Exif.buildTiff(context, bytes, width, height)?.let { Exif.heifExifPayload(it) }
+        if (exifPayload == null) warnings += FileIssue(info.displayName, "no EXIF found in source")
+
+        val srcXmp = Xmp.extract(bytes)
+        val motion = info.isMotionPhoto && info.videoOffset > 0
+        val xmpPacket: String? = when {
+            motion -> Xmp.motionPhoto(
+                "image/heic",
+                (bytes.size - info.videoOffset),
+                Xmp.presentationTimestampUs(srcXmp),
+            )
+            srcXmp != null && !srcXmp.contains("Container:Directory") -> srcXmp
+            srcXmp != null -> {
+                warnings += FileIssue(info.displayName, "source XMP contained a container directory; not copied verbatim")
+                null
+            }
+            else -> null
+        }
+
+        if (exifPayload != null || xmpPacket != null) {
+            try {
+                heif = Isobmff.injectMetadata(heif, exifPayload, xmpPacket?.toByteArray(Charsets.UTF_8))
+            } catch (e: Exception) {
+                warnings += FileIssue(info.displayName, "metadata injection failed: ${e.message}")
+            }
+        }
+
+        if (motion) {
+            val videoLength = bytes.size - info.videoOffset
+            // stream: mpvd box header + video range from the source buffer
+            out.outputStream().use { os ->
+                os.write(heif)
+                os.write(Isobmff.mpvdHeader(videoLength))
+                os.write(bytes, info.videoOffset.toInt(), videoLength.toInt())
+            }
+            outputVideoLength = videoLength
+        } else {
+            if (info.isMotionPhoto) {
+                warnings += FileIssue(info.displayName, "motion photo flagged but video not located; video dropped")
+            }
+            out.writeBytes(heif)
+        }
+        return ConvertOutcome(warnings, outputVideoLength)
     }
 }
